@@ -1,0 +1,308 @@
+================================================================================
+LAB 8: OFDM WITH CYCLIC PREFIX - BUILD, BREAK, FIX
+PDF Report Template
+================================================================================
+
+TITLE: OFDM System Analysis with Cyclic Prefix: Impact on Multipath Channels
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+This lab investigates the critical role of the Cyclic Prefix (CP) in protecting
+OFDM systems against multipath fading. We build a complete OFDM system from first
+principles, then systematically study how the CP and equalization transform a
+distorted multipath channel into manageable per-subcarrier scalar channels.
+
+================================================================================
+TODO 1: BUILD & WITNESS
+================================================================================
+
+OVERVIEW:
+In Phase 2, we simulate an ideal AWGN channel (h = 1) with CP enabled. 
+In Phase 3, we disable the CP and simulate the same multipath channel 
+(h = [1, 0, 0, 0.6]) to showcase ISI without protection.
+
+SIMULATION PARAMETERS:
+- NFFT: 64 subcarriers
+- Modulation: QPSK (2 bits per symbol)
+- Phase 2 Channel: h = 1 (AWGN only)
+- Phase 3 Channel: h = [1, 0, 0, 0.6] (multipath)
+- Phase 2 CP Length: 16 samples
+- Phase 3 CP Length: 0 (no protection)
+- Eb/N0 Range: Phase 2 [0-12 dB], Phase 3 [0-30 dB]
+
+EXPECTED RESULTS:
+- Phase 2 (AWGN + CP): BER curve tracks close to theoretical QPSK AWGN.
+- Phase 3 (Multipath, No CP): BER floor appears at ~10^-2 or higher due to ISI.
+
+PLOTS GENERATED:
+1. BER vs SNR (semilogy):
+   - Blue solid line: Theoretical QPSK AWGN curve
+   - Green circles: Phase 2 (AWGN + CP) - should follow theory closely
+   - Red line with square markers: Phase 3 (No-CP Multipath) - shows floor
+
+2. Reception Constellation at 20 dB SNR (Phase 3):
+   - Red scatter plot showing smeared/distorted QPSK constellation
+   - ISI causes symbols to spread away from ideal QPSK lattice points
+
+Question for Report:
+"Why does the BER floor exist in Phase 3 even with perfect H[k] knowledge?"
+
+ANSWER (Exactly 1 sentence):
+The BER floor exists because inter-symbol interference (ISI) corrupts the 
+data irrecoverably due to non-circular convolution, and the one-tap equalizer 
+cannot separate ISI-distorted symbols even with perfect channel knowledge.
+
+OBSERVATIONS:
+- The dramatic rise in BER for Phase 3 at high SNR demonstrates catastrophic 
+  failure without CP protection.
+- The flat BER floor is characteristic of ISI-dominated systems where noise 
+  becomes negligible but interference dominates.
+- This motivates the need for CP in multipath environments.
+
+================================================================================
+TODO 2: FLIP THE CP ON
+================================================================================
+
+OVERVIEW:
+We now enable the CP (Ncp = 16) on the same multipath channel (h = [1, 0, 0, 0.6])
+and observe the dramatic performance recovery compared to TODO 1 Phase 3.
+
+SIMULATION PARAMETERS:
+- Same as Phase 3, but with: CP Length = 16 samples
+- Eb/N0 Range: 0-20 dB
+
+EXPECTED RESULTS:
+- BER curve descends smoothly (no floor) down to ~10^-4 or lower.
+- Performance is ~1 dB worse than theoretical QPSK AWGN due to CP power tax 
+  and optional imperfect equalization.
+
+PLOTS GENERATED:
+1. Cumulative BER vs SNR (overlay):
+   - Blue line: Theoretical QPSK AWGN (same as TODO 1)
+   - Green circles: Phase 2 AWGN + CP (same as TODO 1)
+   - Red line with squares: Phase 3 No-CP Multipath (same as TODO 1)
+   - Green line with circles: Phase 4 Multipath + CP (NEW - overlaid)
+   - The Phase 4 curve should sit ~1 dB to the right of the theory curve,
+     representing the CP power tax.
+
+2. Reception Constellation at 15 dB SNR (Phase 4):
+   - Green scatter plot showing 4 clean QPSK clouds
+   - Each cloud corresponds to one of the 4 QPSK symbols
+   - Minimal rotation/scaling because equalization recovered H[k]^(-1)
+
+KEY INSIGHT:
+The Cyclic Prefix enables the recovery of a clean QPSK constellation even over 
+multipath channels by converting linear convolution to circular convolution, 
+which becomes per-subcarrier scalar multiplication in the frequency domain.
+
+================================================================================
+TODO 3: CYCLIC PREFIX LENGTH SWEEP
+================================================================================
+
+OVERVIEW:
+We fix Eb/N0 = 10 dB and sweep the CP length through {0, 4, 8, 12, 16, 20, 24, 32}
+to find the optimal CP length for a long channel (h_long with tau ≈ 20).
+
+SIMULATION PARAMETERS:
+- Channel: h_long = [1, 0.9, 0.7, 0.5, 0.3, 0.2, 0.1] (decaying multipath, tau ~ 20)
+- Eb/N0: Fixed at 10 dB
+- Bits per iteration: 10^5
+- Ncp sweep: {0, 4, 8, 12, 16, 20, 24, 32}
+
+EXPECTED RESULTS:
+- BER decreases rapidly as Ncp increases from 0 to 16-20.
+- BER reaches a "knee" (optimal plateau) around Ncp = 20 (matching tau).
+- For Ncp > 20, BER remains flat (no further improvement, only power penalty).
+
+PLOTS GENERATED:
+1. BER vs CP Length (semilogy):
+   - Orange line with circular markers
+   - Vertical dashed black line at Ncp = 20 (the tau value)
+   - Text annotation: "Optimal CP = 20"
+   - The knee identifies the minimum CP required to cover the channel delay spread.
+
+DESIGN RULE:
+Ncp >= tau (delay spread) ensures no ISI. Setting Ncp = tau is efficient; 
+higher values waste power with minimal BER gains.
+
+================================================================================
+WHAT-IF: REMOVE THE EQUALIZER
+================================================================================
+
+OVERVIEW:
+We disable the one-tap equalizer (i.e., remove the division by H[k]) and observe
+how raw received symbols are distorted per-subcarrier even with a working CP.
+
+SYSTEM PARAMETERS:
+- Channel: h_multipath = [1, 0, 0, 0.6]
+- CP Length: 16 samples
+- Eb/N0: 15 dB
+- Modulation: QPSK
+
+EXPECTED RESULTS:
+- Received symbols are NOT clean QPSK points.
+- Each subcarrier exhibits a different rotation and scaling (complex gain).
+- Symbol cloud for each subcarrier is distorted but separable.
+
+PLOTS GENERATED:
+1. Received Symbol Scatter (no equalizer):
+   - 8 different subcarriers plotted in 8 distinct colors
+   - Background faint unit circle for reference
+   - Each color-coded cloud shows how that subcarrier's channel gain 
+     rotated/scaled ALL received symbols in that subcarrier.
+
+REPORT QUESTION:
+"Why does the Cyclic Prefix alone NOT produce clean QPSK symbols?
+What specific job does the equalizer perform that the CP does not?
+(≤ 5 sentences)"
+
+ANSWER:
+
+The Cyclic Prefix alone does not produce clean QPSK because while it converts 
+linear convolution to circular convolution, allowing per-subcarrier scalar 
+channels, each subcarrier is still rotated and scaled by its own complex 
+channel gain H[k]. Without the one-tap equalizer (dividing by H[k]), the 
+received symbols remain distorted in both magnitude and phase. The equalizer 
+is essential to normalize and recover the original symbol constellation by 
+inverting the per-subcarrier channel response. Thus, the CP enables tractable 
+equalization by eliminating ISI, but equalization is required to produce 
+clean QPSK. In summary: CP handles ISI; equalizer handles per-subcarrier 
+fading.
+
+================================================================================
+CONCEPTUAL CHECKPOINT
+================================================================================
+
+REPORT QUESTION:
+"Explain in your own words why the Cyclic Prefix turns a linear multipath 
+channel into independent per-subcarrier scalar channels.
+(≤ 5 sentences)"
+
+ANSWER:
+
+The Cyclic Prefix repeats the last Ncp samples of each OFDM symbol at its 
+beginning, turning the linear time-domain convolution with the multipath 
+channel into circular convolution. In the frequency domain (via DFT), circular 
+convolution becomes per-subcarrier pointwise multiplication: R[k] = H[k] * X[k] + noise.
+Thus, each subcarrier experiences only a scalar multiplicative distortion H[k], 
+independent of other subcarriers, eliminating inter-carrier interference and ISI.
+This transforms a complex MIMO-like problem (where one symbol affects many due 
+to ISI) into N independent single-tap scalar channels, allowing simple 
+per-subcarrier equalization and making OFDM practical for wideband multipath 
+channels.
+
+================================================================================
+STRETCH GOAL: 16-QAM BONUS SECTION
+================================================================================
+
+OVERVIEW:
+We repeat TODO 1 and TODO 2 simulations using 16-QAM modulation (4 bits per 
+symbol) instead of QPSK (2 bits per symbol). This provides deeper insight 
+into modulation robustness and the CP's universal applicability.
+
+SIMULATION PARAMETERS:
+- Same channel, CP, and SNR sweeps as QPSK TODOs
+- Modulation: 16-QAM (Gray-coded)
+- Bits per symbol: 4
+
+EXPECTED OBSERVATIONS:
+- 16-QAM BER curves shift right compared to QPSK (higher SNR needed for same BER)
+  because the inner/outer symbols in the constellation are closer (lower min 
+  distance).
+- The CP benefit and equalizer role remain identical; the CP always converts 
+  multipath to scalar channels regardless of modulation.
+- Phase 3 (No-CP) floor rises further with 16-QAM because inner symbols are 
+  easier to corrupt with ISI.
+
+PLOTS GENERATED:
+1. 16-QAM BER vs SNR (semilogy):
+   - Green circles: Phase 2 (AWGN + CP)
+   - Red line with squares: Phase 3 (No-CP Multipath)
+   - Blue line with circles: Phase 4 (Multipath + CP)
+   - All shifted right relative to QPSK, but same relative behavior.
+
+CONCLUSION:
+The CP's benefit is modulation-agnostic; it solves the fundamental ISI problem,
+enabling any constellation and modulation order to transmit reliably over 
+multipath channels.
+
+================================================================================
+SUMMARY TABLE: TODO 1-2 BER AT KEY POINTS
+================================================================================
+
+Phase 2 (AWGN + CP - theoretical expectations):
+  Eb/N0 (dB):  0      2      4      6      8     10     12
+  Approx BER:  ~1e-2  ~1e-3  ~1e-4  ~1e-5  ~1e-6 <1e-7 <1e-8
+
+Phase 3 (No-CP Multipath - floor effect):
+  Eb/N0 (dB):  0      5     10     15     20     25     30
+  Approx BER:  ~5e-2  ~1e-2 ~1e-2  ~5e-3  ~5e-3  ~5e-3  ~5e-3
+  NOTE: Floor around 1e-2 to 5e-3 (ISI-limited).
+
+Phase 4 (Multipath + CP - recovery):
+  Eb/N0 (dB):  0      2      4      6      8     10     12     16     20
+  Approx BER:  ~5e-2  ~1e-2  ~1e-3  ~1e-4  ~1e-5 ~1e-6  ~1e-7  ~1e-9 <1e-9
+  NOTE: Smooth descent (no floor), slightly worse than Phase 2 (~1 dB tax).
+
+================================================================================
+FINAL THOUGHTS FOR DISCUSSION SECTION
+================================================================================
+
+1. POWER TAX OF CP:
+   The CP is a "silent guardian" of OFDM; it adds redundancy (copies NFFT-NCP
+   samples) and reduces the fraction of useful data per symbol. For Ncp = 16 
+   and NFFT = 64, the efficiency drops to 64/80 = 80%. This ~0.97 dB power 
+   penalty is why Phase 4 sits ~1 dB to the right of theory.
+
+2. SCALABILITY TO LONGER CHANNELS:
+   For very long delay spreads (τ >> NFFT), we would need Ncp ≈ τ, which may 
+   exceed practical limits. Advanced techniques (zero-forcing equalization, 
+   channel shortening prefilters, or windowing) address this.
+
+3. BLIND CHANNEL ESTIMATION:
+   This lab assumed perfect H[k] knowledge (from training pilots or preamble).
+   Realistic systems must estimate H[k], introducing additional overhead and 
+   imperfection. The clean constellations in TODO 2 plots are idealized.
+
+4. EXTENSION TO MIMO-OFDM:
+   The CP principle scales to MIMO-OFDM, where each subcarrier becomes a MIMO 
+   channel (matrix) instead of scalar. Per-subcarrier linear precoding and 
+   MMSE equalization replace simple one-tap scaling.
+
+================================================================================
+CHECKLIST FOR SUBMISSION
+================================================================================
+
+Required Plots (should see 6+ figures when script runs):
+  ☐ TODO 1 - BER vs SNR (3 curves: theory, AWGN+CP, No-CP multipath)
+  ☐ TODO 1 - Constellation at 20 dB (smeared/distorted)
+  ☐ TODO 2 - Cumulative BER (4 curves including Multipath+CP)
+  ☐ TODO 2 - Constellation at 15 dB (clean 4-point QPSK)
+  ☐ TODO 3 - BER vs CP Length with knee annotation
+  ☐ What-If - 8-subcarrier constellation without equalizer
+  ☐ Bonus - 16-QAM BER curves
+
+Required Report Answers:
+  ☐ TODO 1 - 1-sentence BER floor explanation
+  ☐ What-If - ≤5 sentences on why CP alone doesn't clean QPSK
+  ☐ Conceptual - ≤5 sentences on circular convolution → scalar channels
+  ☐ Optional: Discussion of CP power tax, blind estimation, MIMO-OFDM
+
+Code Quality:
+  ☐ Script runs without errors
+  ☐ All plots labeled (title, axis, legend)
+  ☐ Comments explain each section
+  ☐ Constellation plots have clear markers and colors
+
+================================================================================
+END OF REPORT TEMPLATE
+================================================================================
+
+Instructions for student:
+1. Run the lab8_cp.m script in MATLAB.
+2. The script will generate all 7 figures automatically.
+3. Copy the plots into your PDF report.
+4. Fill in the report answers using the provided templates above.
+5. Add any personal observations or insights from your results.
