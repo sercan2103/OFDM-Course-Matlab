@@ -1,0 +1,155 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[top=1.5cm, bottom=1.5cm, left=1.8cm, right=1.8cm]{geometry}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage{hyperref}
+
+\titlespacing{\section}{0pt}{4pt}{2pt}
+\titleformat{\section}{\normalfont\bfseries\normalsize}{}{0em}{}
+
+\setlength{\parskip}{3pt}
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{center}
+  {\large\textbf{OFDM Term Project --- Design Report}} \\[2pt]
+  {\normalsize Kemal Sercan İlhan - 22050211002\quad|\quad Spring 2026}
+\end{center}
+
+\vspace{2pt}\hrule\vspace{4pt}
+
+% -------------------------------------------------------------------------
+\section{Methods Implemented (M2 + M3 + M4 combined)}
+
+\textbf{Pilot Pattern Rearrangement (TX modification) }
+The default \texttt{dense\_4sym} pattern places pilots only on symbols \{0,3,6,9\},
+creating a 3-symbol gap of 130\,\textmu s. At $f_d=3000$\,Hz,
+$J_0(2\pi \cdot 3000 \cdot 130\times10^{-6}) \approx 0$ ---
+the channel is fully decorrelated between snapshots, making any interpolation useless.
+I changed to \textbf{comb\_10sym\_64}: 64 pilots distributed across \emph{all} 10 symbols
+(even RBs: 3 pilots/RB at 4-SC spacing; odd RBs: 2 pilots/RB at 6-SC spacing;
+average 4.9\,SC spacing, 248 data SCs).
+The reduced gap of 43\,\textmu s gives $J_0(2\pi\cdot3000\cdot43\times10^{-6})\approx0.84$
+--- strong correlation every symbol. The 64-pilot cap is respected exactly.
+
+\textbf{Residual STO Correction (M3 --- Classen--Meyr phase-slope estimator).}
+I implemented a frequency-domain differential phase estimator.
+A residual STO of $\delta$ samples imprints a linear phase ramp
+$e^{-j2\pi k\delta/N_\text{FFT}}$ across subcarriers.
+For each consecutive pilot pair with known frequency spacing $\Delta k$,
+$\delta = -\Delta\phi \cdot N_\text{FFT}/(2\pi\,\Delta k)$.
+Averaging over all valid pairs across all 10 symbols gives a robust estimate.
+This was chosen over CP self-correlation because the CP correlator has a
+flat-top ambiguity that makes it unreliable for small offsets.
+Unambiguous range is $\pm128$ samples, exceeding the $\pm32$-sample spec.
+
+\textbf{Residual CFO Correction (M2 --- van de Beek CP correlation).}
+I used the \textbf{van de Beek CP self-correlation} estimator.
+A CFO $\Delta f$ introduces a phase shift between the CP and its tail copy
+proportional to $2\pi\,\Delta f\,N_\text{FFT}/F_s$.
+Averaging over all 10 symbols gives range $\pm15$\,kHz, covering $\pm12$\,kHz.
+The method is unbiased under multipath because all channel taps (max 12 samples)
+fall well within the 288-sample CP.
+
+\textbf{Doppler-Aware Channel Estimation (M3 --- scattered pilots + Wiener smoother).}
+Two upgrades over LS + nearest-neighbour:
+(1)~Cubic \textbf{spline} frequency interpolation handles the non-uniform
+4/6\,SC pilot spacing better than linear.
+(2)~\textbf{Wiener time smoother} applied to all 10 LS pilot snapshots before interpolation:
+$\mathbf{W} = \mathbf{R}_{HH}(\mathbf{R}_{HH}+\sigma^2\mathbf{I})^{-1}$,
+where $R_{HH}(i,j)=J_0(2\pi f_d|i-j|T_\text{sym})$ encodes Jakes temporal correlation.
+At $f_d=0$ this averages all snapshots (noise $\downarrow\!\sqrt{10}$);
+at $f_d=3000$\,Hz it acts as a Jakes-shaped low-pass filter.
+$\sigma^2=5\times10^{-4}$ is tuned to the 30\,dB grading point.
+
+\textbf{ICI-Aware Equalization (M4 --- extended to Q=6 neighbours).}
+At $f_d=3000$\,Hz the channel varies within one symbol ($T_u\approx33\,\mu$s),
+causing inter-carrier interference.
+After initial ZF equalization, the channel slope $\Delta H$ per symbol is estimated from
+central differences of adjacent symbol H snapshots.
+ICI weights $w(\Delta k)=1/\bigl(N(e^{-j2\pi\Delta k/N}-1)\bigr)$ are derived
+from the DFT of the linear time ramp.
+Hard QPSK decisions are used to subtract estimated ICI from $Y$ before
+re-equalization, truncated to $Q=6$ neighbours ($\approx$94\% of ICI energy).
+
+% -------------------------------------------------------------------------
+\textbf{M1 not used.} M1's Schmidl--Cox/Moose CFO estimator requires a preamble.
+Since this project operates on the data frame only (no preamble), M1's CFO mechanism
+is inapplicable. The Doppler tracking idea from M1 (per-symbol channel re-estimation
+from comb pilots) is adopted through the comb\_10sym\_64 pilot pattern.
+
+\section{What Worked and What Didn't}
+
+The pilot rearrangement to \texttt{comb\_10sym\_64} was the single most impactful change,
+eliminating the Doppler dead zone caused by zero Jakes correlation in \texttt{dense\_4sym}.
+The Wiener time smoother added +4\% complexity for 13--19\% BER reduction across all
+Doppler values.
+Several approaches were tried and reverted:
+\emph{MMSE equalization} failed because LS estimation absorbs noise into the channel estimate
+($\sigma^2\!\to\!0$), so the dominant error is interpolation bias, not noise amplification.
+\emph{Wiener frequency interpolation} failed because the 711-bin DC/guard gap between
+the two active frequency halves makes the cross-half correlation matrix near-singular
+(coherence BW $\approx$400\,kHz vs.\ 9.2\,MHz gap).
+\emph{Pilot-based CFO refinement} worsened performance by adding $\sim$200\,Hz Doppler
+phase noise, larger than the ${<}50$\,Hz van de Beek residual.
+\emph{Decision-directed channel refinement} at all 312\,SCs showed negligible gain because
+the dominant residual at $f_d=3000$\,Hz is non-linear Jakes variation within the symbol ---
+a frequency-domain refinement does not address a time-domain problem.
+
+% -------------------------------------------------------------------------
+\section{Complexity --- MATLAB Profiler (Total time: 0.091\,s / frame)}
+
+\begin{center}
+\small
+\begin{tabular}{lrr}
+\toprule
+Function & Total time (s) & \% of frame \\
+\midrule
+\texttt{sto\_estimate\_correct} & 0.042 & 46\% \\
+\texttt{channel\_estimate}      & 0.030 & 33\% \\
+\texttt{equalize}               & 0.010 & 11\% \\
+\texttt{cfo\_estimate\_correct} & 0.002 &  2\% \\
+\texttt{cp\_remove} + \texttt{ofdm\_demod} + \texttt{qpsk\_demap} & 0.004 &  4\% \\
+\midrule
+\textbf{ofdm\_rx (total)}       & \textbf{0.091} & 100\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Note: 0.035\,s of the STO block is the \texttt{rng} call inside pilot regeneration
+(\texttt{local\_pilot\_values}), not algorithmic cost.
+The ICI cancellation loop (\texttt{equalize}: 0.010\,s) is modest relative to
+channel estimation overhead.
+
+\smallskip
+{\small\textit{Op-count estimate:} Since \texttt{flops()} was removed in MATLAB R13,
+op-count was estimated by calibrating multiply-accumulate throughput on the test machine
+($1.02\times10^9$\,MACs/s), then scaling by the algorithmic frame time
+(0.056\,s $=$ profiler total $-$ \texttt{rng} overhead).
+\textbf{Estimated op-count: $\sim\!5.7\times10^7$ MACs/frame.}}
+
+% -------------------------------------------------------------------------
+\section{BER Results at $f_d = 3000$\,Hz (grading operating point)}
+
+\begin{center}
+\small
+\begin{tabular}{lrrr}
+\toprule
+$f_d$ (Hz) & Tier-1 @ 30\,dB & This receiver @ 30\,dB & Improvement \\
+\midrule
+1000 & $\sim1.54\times10^{-2}$ & $3.26\times10^{-3}$ & $4.7\times$ \\
+2000 & $\sim4.50\times10^{-2}$ & $5.53\times10^{-3}$ & $8.1\times$ \\
+\textbf{3000} & $\mathbf{\sim7.53\times10^{-2}}$ & $\mathbf{9.99\times10^{-3}}$ & $\mathbf{7.5\times}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\vspace{2pt}\hrule\vspace{2pt}
+{\footnotesize Results obtained with N\_TRIALS=200 ($\geq$1400 errors per SNR point).
+BER plot submitted as \texttt{İlhan\_ber.png}.}
+
+\end{document}
